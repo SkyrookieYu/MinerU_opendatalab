@@ -25,7 +25,7 @@ from mineru.version import __version__
 from mineru.utils.hash_utils import bytes_md5
 
 
-def page_model_info_to_page_info(page_model_info, image_dict, page, image_writer, page_index, ocr_enable=False, formula_enabled=True):
+def page_model_info_to_page_info(page_model_info, image_dict, page, image_writer, page_index, ocr_enable=False, formula_enabled=True, disable_image_extract=False):
     scale = image_dict["scale"]
     page_pil_img = image_dict["img_pil"]
     # page_img_md5 = str_md5(image_dict["img_base64"])
@@ -155,7 +155,7 @@ def page_model_info_to_page_info(page_model_info, image_dict, page, image_writer
     for span in spans:
         if span['type'] in [ContentType.IMAGE, ContentType.TABLE, ContentType.INTERLINE_EQUATION]:
             span = cut_image_and_table(
-                span, page_pil_img, page_img_md5, page_index, image_writer, scale=scale
+                span, page_pil_img, page_img_md5, page_index, image_writer, scale=scale, disable_image_extract=disable_image_extract
             )
 
     """span填充进block"""
@@ -173,14 +173,14 @@ def page_model_info_to_page_info(page_model_info, image_dict, page, image_writer
     return page_info
 
 
-def result_to_middle_json(model_list, images_list, pdf_doc, image_writer, lang=None, ocr_enable=False, formula_enabled=True):
+def result_to_middle_json(model_list, images_list, pdf_doc, image_writer, lang=None, ocr_enable=False, formula_enabled=True, disable_image_extract=False):
     middle_json = {"pdf_info": [], "_backend":"pipeline", "_version_name": __version__}
     formula_enabled = get_formula_enable(formula_enabled)
     for page_index, page_model_info in tqdm(enumerate(model_list), total=len(model_list), desc="Processing pages"):
         page = pdf_doc[page_index]
         image_dict = images_list[page_index]
         page_info = page_model_info_to_page_info(
-            page_model_info, image_dict, page, image_writer, page_index, ocr_enable=ocr_enable, formula_enabled=formula_enabled
+            page_model_info, image_dict, page, image_writer, page_index, ocr_enable=ocr_enable, formula_enabled=formula_enabled, disable_image_extract=disable_image_extract
         )
         if page_info is None:
             page_w, page_h = map(int, page.get_size())
