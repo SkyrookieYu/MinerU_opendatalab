@@ -298,6 +298,142 @@ def parse_doc(
         logger.exception(e)
 
 
+def get_pdf_page_count(pdf_path: Path) -> int:
+    """
+    Get the total number of pages in a PDF file.
+
+    Args:
+        pdf_path: Path to the PDF file
+
+    Returns:
+        Total number of pages
+    """
+    import pypdfium2 as pdfium
+    pdf_bytes = read_fn(pdf_path)
+    pdf_doc = pdfium.PdfDocument(pdf_bytes)
+    page_count = len(pdf_doc)
+    pdf_doc.close()
+    return page_count
+
+
+def parse_doc_by_physical_page(
+    pdf_path: Path,
+    output_dir,
+    lang="ch",
+    backend="pipeline",
+    method="auto",
+    server_url=None,
+    disable_image_extract=False,
+):
+    """
+    Parse PDF page by page, bypassing MinerU's semantic merging mechanism.
+    This ensures each physical page's content is strictly separated.
+
+    Suitable for scenarios requiring page-based text search.
+
+    Output format (JSON file):
+    [
+        {"pageNo": 1, "words": "text content of physical page 1"},
+        {"pageNo": 2, "words": "text content of physical page 2"},
+        ...
+    ]
+
+    Args:
+        pdf_path: Path to the PDF file (single file only)
+        output_dir: Output directory for storing parsing results
+        lang: Language option for OCR, default is 'ch'
+        backend: Backend for parsing ('pipeline' recommended for this use case)
+        method: Parsing method ('auto', 'txt', 'ocr')
+        server_url: Server URL for vlm-http-client backend
+        disable_image_extract: Disable image extraction due to copyright restrictions
+
+    Returns:
+        List of dictionaries with pageNo and words
+    """
+    import tempfile
+    import shutil
+
+    pdf_path = Path(pdf_path)
+    file_name = pdf_path.stem
+    total_pages = get_pdf_page_count(pdf_path)
+
+    logger.info(f"Processing {file_name} with {total_pages} pages (physical page mode)")
+
+    result = []
+
+    # Create a temporary directory for intermediate outputs
+    temp_base_dir = tempfile.mkdtemp(prefix="mineru_physical_page_")
+
+    try:
+        for page_id in range(total_pages):
+            logger.info(f"Processing page {page_id + 1}/{total_pages}")
+
+            # Create temp output dir for this page
+            temp_output_dir = os.path.join(temp_base_dir, f"page_{page_id}")
+
+            # Parse single page
+            do_parse(
+                output_dir=temp_output_dir,
+                pdf_file_names=[file_name],
+                pdf_bytes_list=[read_fn(pdf_path)],
+                p_lang_list=[lang],
+                backend=backend,
+                parse_method=method,
+                server_url=server_url,
+                start_page_id=page_id,
+                end_page_id=page_id,  # Only process this single page
+                disable_image_extract=disable_image_extract,
+                output_format="client_json",
+                # Disable unnecessary outputs for performance
+                f_draw_layout_bbox=False,
+                f_draw_span_bbox=False,
+                f_dump_middle_json=False,
+                f_dump_model_output=False,
+                f_dump_orig_pdf=False,
+                f_dump_content_list=False,
+            )
+
+            # Read the generated JSON for this page
+            json_path = os.path.join(temp_output_dir, file_name, method, f"{file_name}.json")
+            if os.path.exists(json_path):
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    page_data = json.load(f)
+                    # page_data should be [{"pageNo": 1, "words": "..."}]
+                    # We need to fix the pageNo to reflect the actual physical page
+                    if page_data and len(page_data) > 0:
+                        result.append({
+                            "pageNo": page_id + 1,  # Physical page number (1-based)
+                            "words": page_data[0].get("words", "")
+                        })
+                    else:
+                        result.append({
+                            "pageNo": page_id + 1,
+                            "words": ""
+                        })
+            else:
+                logger.warning(f"JSON output not found for page {page_id + 1}")
+                result.append({
+                    "pageNo": page_id + 1,
+                    "words": ""
+                })
+
+    finally:
+        # Clean up temporary directory
+        shutil.rmtree(temp_base_dir, ignore_errors=True)
+
+    # Write final result to output directory
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    output_json_path = output_path / f"{file_name}_physical_pages.json"
+
+    with open(output_json_path, 'w', encoding='utf-8') as f:
+        json.dump(result, ensure_ascii=False, indent=2, fp=f)
+
+    logger.info(f"Physical page output saved to: {output_json_path}")
+
+    return result
+
+
 if __name__ == '__main__':
     # args
     __dir__ = os.path.dirname(os.path.abspath(__file__))

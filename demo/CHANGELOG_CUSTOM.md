@@ -1084,4 +1084,143 @@ MinerU 的處理流程 (`model_json_to_middle_json`) 會進行**跨頁內容合�
 
 ### 結論
 
-此特性是 MinerU 的核心設計，**不建議修改**。對於需要嚴格按物理頁切分的場景，需要使用其他工具或自行處理 `model_json` 原始輸出。
+此特性是 MinerU 的核心設計，**不建議修改**。對於需要嚴格按物理頁切分的場景，請使用下方的「功能五：物理頁面模式」。
+
+---
+
+## 功能五：物理頁面模式 (parse_doc_by_physical_page)
+
+### 功能說明
+
+針對需要嚴格按 PDF 物理頁碼進行文字搜尋的場景，提供逐頁解析功能，繞過 MinerU 的語意合併機制。
+
+### 設計原理
+
+利用 `do_parse` 的 `start_page_id` 和 `end_page_id` 參數，每次只處理一頁，確保：
+- 每個物理頁的內容獨立輸出
+- 不會發生跨頁內容合併
+- 頁碼與 PDF 物理頁碼嚴格對應
+
+### 新增函數
+
+#### `demo/demo.py` - `get_pdf_page_count`
+
+```python
+def get_pdf_page_count(pdf_path: Path) -> int:
+    """
+    Get the total number of pages in a PDF file.
+    """
+    import pypdfium2 as pdfium
+    pdf_bytes = read_fn(pdf_path)
+    pdf_doc = pdfium.PdfDocument(pdf_bytes)
+    page_count = len(pdf_doc)
+    pdf_doc.close()
+    return page_count
+```
+
+#### `demo/demo.py` - `parse_doc_by_physical_page`
+
+```python
+def parse_doc_by_physical_page(
+    pdf_path: Path,
+    output_dir,
+    lang="ch",
+    backend="pipeline",
+    method="auto",
+    server_url=None,
+    disable_image_extract=False,
+):
+    """
+    Parse PDF page by page, bypassing MinerU's semantic merging mechanism.
+    This ensures each physical page's content is strictly separated.
+
+    Suitable for scenarios requiring page-based text search.
+
+    Output format (JSON file):
+    [
+        {"pageNo": 1, "words": "text content of physical page 1"},
+        {"pageNo": 2, "words": "text content of physical page 2"},
+        ...
+    ]
+    """
+```
+
+### 使用方式
+
+```python
+from demo import parse_doc_by_physical_page
+from pathlib import Path
+
+# 單一 PDF 逐頁解析
+result = parse_doc_by_physical_page(
+    pdf_path=Path("document.pdf"),
+    output_dir="output_dir",
+    backend="pipeline",
+    disable_image_extract=True,  # 可選：啟用版權限制
+)
+
+# 結果會輸出到: output_dir/document_physical_pages.json
+```
+
+### 輸出格式
+
+輸出檔案：`{pdf_name}_physical_pages.json`
+
+```json
+[
+  {"pageNo": 1, "words": "第一頁的純文字內容..."},
+  {"pageNo": 2, "words": "第二頁的純文字內容..."},
+  {"pageNo": 3, "words": "第三頁的純文字內容..."}
+]
+```
+
+### 與 client_json 的差異
+
+| 特性 | `output_format="client_json"` | `parse_doc_by_physical_page` |
+|------|-------------------------------|------------------------------|
+| 頁碼對應 | 邏輯頁（可能有空頁） | 物理頁（嚴格對應） |
+| 跨頁合併 | 會發生 | 不會發生 |
+| 適用場景 | RAG chunking | 頁面文字搜尋 |
+| 效能 | 較快（批次處理） | 較慢（逐頁處理） |
+| 輸出檔名 | `{name}.json` | `{name}_physical_pages.json` |
+
+### 注意事項
+
+1. **效能考量**：逐頁處理會比批次處理慢，但對於 pipeline 後端影響可接受（模型為 singleton）
+2. **跨頁內容**：跨頁表格、段落會被切斷，這是此模式的預期行為
+3. **單一檔案**：此函數設計為處理單一 PDF 檔案
+
+---
+
+## 功能總結（更新）
+
+| 功能 | 參數/函數 | 說明 |
+|------|----------|------|
+| 純文字輸出 | `output_format="plaintext"` | 輸出 .txt 檔案，移除所有 Markdown 格式 |
+| 版權限制 | `disable_image_extract=True` | 不提取圖片，顯示版權提示 |
+| 客戶端 JSON | `output_format="client_json"` | 分頁純文字（邏輯頁，有語意合併） |
+| 物理頁面模式 | `parse_doc_by_physical_page()` | 分頁純文字（物理頁，無語意合併） |
+
+### 完整使用範例
+
+```python
+from demo import parse_doc, parse_doc_by_physical_page
+from pathlib import Path
+
+# 情境 A: RAG 應用 - 使用語意合併的 client_json
+parse_doc(
+    [Path("document.pdf")],
+    "output_dir",
+    backend="pipeline",
+    disable_image_extract=True,
+    output_format="client_json"
+)
+
+# 情境 B: 頁面搜尋應用 - 使用物理頁面模式
+parse_doc_by_physical_page(
+    pdf_path=Path("document.pdf"),
+    output_dir="output_dir",
+    backend="pipeline",
+    disable_image_extract=True,
+)
+```
