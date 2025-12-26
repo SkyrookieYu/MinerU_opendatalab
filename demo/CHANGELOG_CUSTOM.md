@@ -1192,6 +1192,288 @@ result = parse_doc_by_physical_page(
 
 ---
 
+## 功能六：異步 PDF 解析 API (FastAPI)
+
+### 功能說明
+
+提供 RESTful API 介面，採用異步任務模式處理 PDF 解析請求。客戶端先提交 PDF 取得 `task_id`，後續使用 `task_id` 輪詢查詢解析結果。適合需要 HTTP API 整合的應用場景。
+
+### 設計架構
+
+```
+┌──────────┐          ┌─────────────────┐          ┌──────────────────┐
+│  Client  │          │   FastAPI Server │          │ Background Worker│
+└────┬─────┘          └────────┬────────┘          └────────┬─────────┘
+     │                         │                            │
+     │  POST /api/v1/parse     │                            │
+     │    (上傳 PDF)           │                            │
+     ├────────────────────────>│                            │
+     │                         │  生成 task_id              │
+     │                         │  存入任務隊列              │
+     │                         ├───────────────────────────>│
+     │  返回 task_id           │                            │
+     │<────────────────────────┤                            │
+     │                         │                            │  開始處理 PDF
+     │                         │                            │  (parse_doc_by_physical_page)
+     │  GET /result/{task_id}  │                            │
+     ├────────────────────────>│                            │
+     │  返回 processing        │                            │
+     │<────────────────────────┤                            │
+     │                         │                            │  處理完成
+     │  GET /result/{task_id}  │                            │
+     ├────────────────────────>│                            │
+     │  返回 completed + 結果  │                            │
+     │<────────────────────────┤── 自動刪除臨時檔案         │
+```
+
+### 新增檔案
+
+| 檔案 | 說明 |
+|------|------|
+| `demo/api.py` | FastAPI 應用程式主體 |
+| `demo/test_api.py` | API 測試腳本 |
+
+---
+
+### API 端點
+
+#### 1. 提交 PDF 解析任務
+
+```
+POST /api/v1/parse
+Content-Type: multipart/form-data
+
+Request:
+  - file: PDF 檔案 (required)
+
+Response: 201 Created
+{
+  "task_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "pending"
+}
+```
+
+#### 2. 查詢任務結果
+
+```
+GET /api/v1/result/{task_id}
+
+Response (等待中): 202 Accepted
+{
+  "task_id": "550e8400-...",
+  "status": "pending"
+}
+
+Response (處理中): 202 Accepted
+{
+  "task_id": "550e8400-...",
+  "status": "processing"
+}
+
+Response (完成): 200 OK
+{
+  "task_id": "550e8400-...",
+  "status": "completed",
+  "result": [
+    {"pageNo": 1, "words": "第一頁內容..."},
+    {"pageNo": 2, "words": "第二頁內容..."}
+  ]
+}
+# 注意：返回後自動刪除任務資料和臨時檔案
+
+Response (失敗): 200 OK
+{
+  "task_id": "550e8400-...",
+  "status": "failed",
+  "error": "錯誤訊息"
+}
+
+Response (不存在): 404 Not Found
+{
+  "detail": "Task not found"
+}
+```
+
+#### 3. 健康檢查
+
+```
+GET /api/v1/health
+
+Response: 200 OK
+{
+  "status": "healthy",
+  "pending_tasks": 0,
+  "processing_tasks": 1
+}
+```
+
+#### 4. Swagger UI 文檔
+
+FastAPI 內建 OpenAPI 文檔：
+
+| 界面 | URL |
+|------|-----|
+| Swagger UI | http://localhost:8000/docs |
+| ReDoc | http://localhost:8000/redoc |
+| OpenAPI JSON | http://localhost:8000/openapi.json |
+
+---
+
+### 任務狀態流程
+
+```
+         提交任務              開始處理              處理完成
+┌─────────┐      ┌────────────┐      ┌────────────┐
+│ pending │ ───> │ processing │ ───> │ completed  │
+└─────────┘      └────────────┘      └────────────┘
+                       │
+                       │ 發生錯誤
+                       ▼
+                 ┌──────────┐
+                 │  failed  │
+                 └──────────┘
+```
+
+---
+
+### 核心實作說明
+
+#### `demo/api.py`
+
+```python
+# 主要組件
+
+# 1. 任務狀態管理
+class TaskStatus(str, Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+# 2. 任務資料結構
+class TaskData:
+    task_id: str
+    status: TaskStatus
+    pdf_path: Path
+    output_dir: Path
+    result: Optional[list]
+    error: Optional[str]
+    created_at: datetime
+
+# 3. 背景任務執行器 (ThreadPoolExecutor)
+executor = ThreadPoolExecutor(max_workers=2)
+
+# 4. 任務存儲 (記憶體字典)
+tasks: dict[str, TaskData] = {}
+```
+
+**設計特點：**
+
+1. **異步處理**：使用 `ThreadPoolExecutor` 在背景執行 PDF 解析，避免阻塞 HTTP 請求
+2. **物理頁面模式**：預設使用 `parse_doc_by_physical_page`，確保頁碼與 PDF 物理頁嚴格對應
+3. **自動清理**：任務完成並被取回後，自動刪除臨時檔案和任務資料
+4. **版權限制**：預設 `disable_image_extract=True`，不提取圖片
+
+---
+
+### 使用方式
+
+#### 啟動 API 服務器
+
+```bash
+cd /home/cobra/projects/MinerU_opendatalab/demo
+
+# 方式一：使用 uvicorn
+uvicorn api:app --host 0.0.0.0 --port 8000
+
+# 方式二：直接執行
+python api.py
+```
+
+#### 使用 curl 測試
+
+```bash
+# 1. 提交 PDF
+curl -X POST "http://localhost:8000/api/v1/parse" \
+  -F "file=@pdfs/demo1.pdf"
+# Response: {"task_id": "xxx-xxx", "status": "pending"}
+
+# 2. 查詢結果（輪詢直到 completed）
+curl "http://localhost:8000/api/v1/result/{task_id}"
+# Response: {"task_id": "...", "status": "completed", "result": [...]}
+```
+
+#### 使用測試腳本
+
+```bash
+# 測試 pdfs/ 目錄下所有 PDF
+python test_api.py
+
+# 指定單一 PDF
+python test_api.py --pdf pdfs/demo1.pdf
+
+# 指定其他 PDF 目錄
+python test_api.py --pdf-dir /path/to/pdfs/
+
+# 自訂輸出目錄
+python test_api.py --output-dir my_results/
+
+# 自訂 API URL
+python test_api.py --url http://192.168.1.100:8000
+```
+
+**測試腳本功能：**
+- 自動測試指定目錄下所有 PDF 檔案
+- 將每個任務的結果 JSON 保存到輸出目錄
+- 測試錯誤處理（非 PDF 檔案、不存在的 task_id）
+
+---
+
+### 輸出範例
+
+處理 `small_ocr.pdf` (8 頁) 的 API 回應：
+
+```json
+{
+  "task_id": "1e29c637-5dd5-419b-95c2-408ea561ee2b",
+  "status": "completed",
+  "result": [
+    {
+      "pageNo": 1,
+      "words": "史的事情。(3)为有用物的量找到社会尺度，也是这样..."
+    },
+    {
+      "pageNo": 2,
+      "words": "内在的交换价值似乎是经院哲学家所说的形容语的矛盾..."
+    },
+    {
+      "pageNo": 3,
+      "words": "的、化学的属性等等。商品的天然属性只是就它们使商品有用..."
+    }
+  ]
+}
+```
+
+---
+
+### 檔案變更總覽（更新）
+
+```
+MinerU_opendatalab/
+├── demo/
+│   ├── api.py                     [新增] FastAPI 異步 API 應用
+│   ├── test_api.py                [新增] API 測試腳本
+│   ├── md_to_plaintext.py         [既有] Markdown 轉純文字工具
+│   ├── demo.py                    [既有] 核心解析函數
+│   ├── CHANGELOG_CUSTOM.md        [更新] 本變更紀錄文件
+│   └── output_api_test/           [新增] API 測試輸出目錄
+│
+└── mineru/
+    └── (既有修改，見功能一至五)
+```
+
+---
+
 ## 功能總結（更新）
 
 | 功能 | 參數/函數 | 說明 |
@@ -1200,6 +1482,7 @@ result = parse_doc_by_physical_page(
 | 版權限制 | `disable_image_extract=True` | 不提取圖片，顯示版權提示 |
 | 客戶端 JSON | `output_format="client_json"` | 分頁純文字（邏輯頁，有語意合併） |
 | 物理頁面模式 | `parse_doc_by_physical_page()` | 分頁純文字（物理頁，無語意合併） |
+| 異步 API | `api.py` | RESTful API，異步任務模式 |
 
 ### 完整使用範例
 
@@ -1223,4 +1506,32 @@ parse_doc_by_physical_page(
     backend="pipeline",
     disable_image_extract=True,
 )
+
+# 情境 C: HTTP API 整合 - 啟動 API 服務器
+# uvicorn api:app --host 0.0.0.0 --port 8000
+```
+
+### API 使用範例 (Python requests)
+
+```python
+import requests
+import time
+
+API_URL = "http://localhost:8000"
+
+# 1. 提交 PDF
+with open("document.pdf", "rb") as f:
+    resp = requests.post(f"{API_URL}/api/v1/parse", files={"file": f})
+task_id = resp.json()["task_id"]
+
+# 2. 輪詢結果
+while True:
+    resp = requests.get(f"{API_URL}/api/v1/result/{task_id}")
+    data = resp.json()
+    if data["status"] == "completed":
+        result = data["result"]  # [{pageNo: 1, words: "..."}, ...]
+        break
+    elif data["status"] == "failed":
+        raise Exception(data["error"])
+    time.sleep(3)
 ```
