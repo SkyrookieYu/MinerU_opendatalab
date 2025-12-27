@@ -2,7 +2,7 @@
 
 ## 版本資訊
 - 基於分支: `mineru_2_6_7_custom`
-- 變更日期: 2025-12-22
+- 變更日期: 2025-12-27
 - 基於 MinerU 版本: 2.6.7
 
 ---
@@ -1535,3 +1535,221 @@ while True:
         raise Exception(data["error"])
     time.sleep(3)
 ```
+
+---
+
+## 功能七：API 效能測試與時間統計
+
+### 功能說明
+
+為 `test_api.py` 新增詳細的時間統計功能，方便進行效能分析和比較不同環境（如 Local GPU vs Cloud CPU）的處理速度。
+
+### 新增功能
+
+#### 時間統計項目
+
+| 統計項目 | 說明 |
+|----------|------|
+| Submit Time | 從上傳 PDF 到收到 task_id 的時間 |
+| Process Time | 從收到 task_id 到處理完成的時間 |
+| Total Time | Submit Time + Process Time |
+| Pages | 該 PDF 的總頁數 |
+
+#### 輸出格式
+
+```
+============================================================
+Timing Summary
+============================================================
+  File                            Pages     Submit      Process      Total
+  ------------------------------ ------ ---------- ------------ ----------
+  demo1.pdf                          13      0.01s       57.09s     57.10s
+  demo2.pdf                           6      0.02s       18.04s     18.06s
+  demo3.pdf                          10      0.01s       27.05s     27.05s
+  small_ocr.pdf                       8      0.01s       12.05s     12.06s
+  ------------------------------ ------ ---------- ------------ ----------
+  TOTAL                              37      0.04s      114.23s    114.27s
+```
+
+### 使用方式
+
+```bash
+# 使用預設設定測試
+python test_api.py
+
+# 指定輪詢間隔（秒）
+python test_api.py --poll-interval 30
+
+# 指定 API URL
+python test_api.py --url http://35.194.197.46:8000 --poll-interval 30
+```
+
+### 效能比較報告
+
+測試日期：2025-12-26
+
+| 環境 | GPU | 總頁數 | 總時間 | 平均速度 |
+|------|-----|--------|--------|----------|
+| Local | 48 GB VRAM | 37 | 114.27s | **3.09 秒/頁** |
+| GCP (CPU) | 無 | 37 | 662.17s | **17.90 秒/頁** |
+
+**結論：** GCP (CPU) 比 Local (GPU) 慢約 **5.8 倍**
+
+詳細比較數據請參考 `demo/benchmark_local_vs_gcp.md`。
+
+---
+
+## 功能八：簡易客戶端 (simple_client.py)
+
+### 功能說明
+
+提供簡潔的客戶端腳本，讓同事可以快速上手使用 MinerU PDF 解析 API，無需了解複雜的設定。
+
+### 新增檔案
+
+#### `demo/simple_client.py`
+
+專為簡易使用設計的客戶端腳本，特點：
+
+1. **最少依賴**：只需 `pip install requests`
+2. **預設連線 GCP**：預設 API URL 為 `http://35.194.197.46:8000`
+3. **自動批次處理**：自動處理 `pdfs/` 目錄下所有 PDF
+4. **雙格式輸出**：同時輸出 JSON 和 TXT 格式
+5. **中文界面**：使用繁體中文顯示訊息
+
+### 使用方式
+
+```bash
+# 安裝依賴
+pip install requests
+
+# 測試 pdfs/ 目錄下所有 PDF
+python simple_client.py
+
+# 測試單一 PDF 檔案
+python simple_client.py --pdf document.pdf
+
+# 指定 API 伺服器位址
+python simple_client.py --url http://192.168.1.100:8000
+
+# 指定輸出目錄
+python simple_client.py --output my_results/
+```
+
+### 輸出說明
+
+結果會儲存到 `output_results/` 目錄（可自訂）：
+
+```
+output_results/
+├── demo1.json    # 完整 JSON 結果 (含 task_id, status, result)
+├── demo1.txt     # 純文字版本（方便閱讀）
+├── demo2.json
+├── demo2.txt
+└── ...
+```
+
+#### JSON 格式
+
+```json
+{
+  "task_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "completed",
+  "result": [
+    {"pageNo": 1, "words": "第一頁內容..."},
+    {"pageNo": 2, "words": "第二頁內容..."}
+  ]
+}
+```
+
+#### TXT 格式
+
+```
+=== 第 1 頁 ===
+第一頁內容...
+
+=== 第 2 頁 ===
+第二頁內容...
+```
+
+### 範例輸出
+
+```
+============================================================
+MinerU PDF 解析 API 簡易客戶端
+============================================================
+API 伺服器: http://35.194.197.46:8000
+輸出目錄:   output_results
+PDF 檔案:   4 個
+  - demo1.pdf
+  - demo2.pdf
+  - demo3.pdf
+  - small_ocr.pdf
+
+檢查伺服器連線...
+  伺服器狀態: OK
+
+============================================================
+處理檔案: demo1.pdf
+============================================================
+1. 上傳 PDF...
+   Task ID: 1e29c637-5dd5-419b-95c2-408ea561ee2b
+2. 等待處理完成...
+   處理中... (30 秒)
+   處理中... (60 秒)
+   完成! (耗時 85.3 秒)
+3. 結果已儲存: output_results/demo1.json
+   純文字版本: output_results/demo1.txt
+
+4. 預覽 (共 13 頁):
+   [第 1 頁] 物聯網系統安全威脅分析與防護策略研究...
+   [第 2 頁] 近年來物聯網技術快速發展...
+   [第 3 頁] 本研究採用文獻分析法...
+   ... 還有 10 頁
+
+============================================================
+處理完成!
+============================================================
+成功: 4/4 個檔案
+  - demo1.pdf: 13 頁
+  - demo2.pdf: 6 頁
+  - demo3.pdf: 10 頁
+  - small_ocr.pdf: 8 頁
+
+結果已儲存到: output_results/
+```
+
+---
+
+## 檔案變更總覽（更新）
+
+```
+MinerU_opendatalab/
+├── demo/
+│   ├── api.py                     [既有] FastAPI 異步 API 應用
+│   ├── test_api.py                [更新] API 測試腳本（新增時間統計）
+│   ├── simple_client.py           [新增] 簡易客戶端腳本
+│   ├── benchmark_local_vs_gcp.md  [新增] Local vs GCP 效能比較報告
+│   ├── md_to_plaintext.py         [既有] Markdown 轉純文字工具
+│   ├── demo.py                    [既有] 核心解析函數
+│   ├── CHANGELOG_CUSTOM.md        [更新] 本變更紀錄文件
+│   ├── output_api_test/           [既有] API 測試輸出目錄
+│   └── output_results/            [新增] 簡易客戶端輸出目錄
+│
+└── mineru/
+    └── (既有修改，見功能一至五)
+```
+
+---
+
+## 功能總結（最終版）
+
+| 功能 | 參數/檔案 | 說明 |
+|------|----------|------|
+| 純文字輸出 | `output_format="plaintext"` | 輸出 .txt 檔案，移除所有 Markdown 格式 |
+| 版權限制 | `disable_image_extract=True` | 不提取圖片，顯示版權提示 |
+| 客戶端 JSON | `output_format="client_json"` | 分頁純文字（邏輯頁，有語意合併） |
+| 物理頁面模式 | `parse_doc_by_physical_page()` | 分頁純文字（物理頁，無語意合併） |
+| 異步 API | `api.py` | RESTful API，異步任務模式 |
+| 效能統計 | `test_api.py` | 時間統計，效能比較 |
+| 簡易客戶端 | `simple_client.py` | 同事快速上手使用 |
