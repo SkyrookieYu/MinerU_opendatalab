@@ -9,7 +9,7 @@ import aiohttp
 from pathlib import Path
 from loguru import logger
 import time
-from typing import Dict
+from typing import Dict, Optional
 
 
 class TianshuClient:
@@ -115,7 +115,10 @@ class TianshuClient:
             
             if task_status == 'completed':
                 logger.info(f"✅ Task {task_id} completed!")
-                logger.info(f"   Output: {status.get('result_path')}")
+                # 顯示內容長度而非伺服器路徑（對遠端 Client 更有意義）
+                data = status.get('data', {})
+                if data.get('content'):
+                    logger.info(f"   Content: {len(data['content']):,} chars")
                 return status
             
             elif task_status == 'failed':
@@ -145,80 +148,159 @@ class TianshuClient:
         async with session.delete(f'{self.base_url}/tasks/{task_id}') as resp:
             return await resp.json()
 
+    def save_result(
+        self,
+        status: Dict,
+        output_dir: str = './output',
+        filename: Optional[str] = None
+    ) -> Optional[str]:
+        """
+        將完成的任務結果儲存到本地檔案
+
+        Args:
+            status: 任務狀態字典（從 wait_for_task 或 get_task_status 取得）
+            output_dir: 輸出目錄
+            filename: 輸出檔名（不含副檔名），預設使用 task_id
+
+        Returns:
+            儲存的檔案路徑，失敗時返回 None
+        """
+        if status.get('status') != 'completed':
+            logger.warning(f"Task not completed, status: {status.get('status')}")
+            return None
+
+        data = status.get('data', {})
+        content = data.get('content')
+
+        if not content:
+            logger.warning("No content in task result")
+            return None
+
+        # 建立輸出目錄
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        # 決定檔名
+        if not filename:
+            filename = status.get('task_id', 'output')
+
+        # 儲存 Markdown 檔案
+        md_file = output_path / f"{filename}.md"
+        md_file.write_text(content, encoding='utf-8')
+
+        logger.info(f"💾 Saved: {md_file} ({len(content):,} chars)")
+
+        return str(md_file)
+
 
 async def example_single_task():
     """示例1：提交单个任务并等待完成"""
     logger.info("=" * 60)
     logger.info("示例1：提交单个任务")
     logger.info("=" * 60)
-    
+
     client = TianshuClient()
-    
+    file_path = '../../demo/pdfs/demo1.pdf'
+
     async with aiohttp.ClientSession() as session:
         # 提交任务
         result = await client.submit_task(
             session,
-            file_path='../../demo/pdfs/demo1.pdf',
+            file_path=file_path,
             backend='pipeline',
             lang='ch',
             formula_enable=True,
             table_enable=True
         )
-        
+
         if result.get('success'):
             task_id = result['task_id']
-            
+
             # 等待完成
             logger.info(f"⏳ Waiting for task {task_id} to complete...")
             final_status = await client.wait_for_task(session, task_id)
-            
+
+            # 儲存結果到本地
+            if final_status.get('status') == 'completed':
+                filename = Path(file_path).stem  # 使用原始檔名
+                client.save_result(final_status, output_dir='./output', filename=filename)
+
             return final_status
 
 
-async def example_batch_tasks():
-    """示例2：批量提交多个任务并并发等待"""
+async def example_batch_tasks(input_dir: str = './pdfs', output_dir: str = './output'):
+    """示例2：批量提交目錄下所有檔案並等待完成"""
     logger.info("=" * 60)
     logger.info("示例2：批量提交多个任务")
     logger.info("=" * 60)
-    
+
     client = TianshuClient()
-    
-    # 准备任务列表
+
+    # 支援的檔案格式
+    supported_extensions = {'.pdf', '.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls', '.html', '.htm', '.png', '.jpg', '.jpeg'}
+
+    # 遍歷目錄下所有支援的檔案
+    input_path = Path(input_dir)
+    if not input_path.exists():
+        logger.error(f"❌ Input directory not found: {input_dir}")
+        return []
+
     files = [
-        '../../demo/pdfs/demo1.pdf',
-        '../../demo/pdfs/demo2.pdf',
-        '../../demo/pdfs/demo3.pdf',
+        str(f) for f in input_path.iterdir()
+        if f.is_file()
+        and f.suffix.lower() in supported_extensions
+        and 'Zone.Identifier' not in f.name  # 排除 Windows Zone.Identifier 檔案
     ]
-    
+
+    if not files:
+        logger.warning(f"⚠️  No supported files found in {input_dir}")
+        return []
+
+    logger.info(f"📂 Found {len(files)} files in {input_dir}")
+
     async with aiohttp.ClientSession() as session:
         # 并发提交所有任务
         logger.info(f"📤 Submitting {len(files)} tasks...")
         submit_tasks = [
-            client.submit_task(session, file) 
+            client.submit_task(session, file)
             for file in files
         ]
         results = await asyncio.gather(*submit_tasks)
-        
-        # 提取 task_ids
-        task_ids = [r['task_id'] for r in results if r.get('success')]
+
+        # 提取成功提交的任務資訊（task_id 與原始檔案路徑）
+        submitted = [
+            (r['task_id'], files[i])
+            for i, r in enumerate(results)
+            if r.get('success')
+        ]
+        task_ids = [t[0] for t in submitted]
         logger.info(f"✅ Submitted {len(task_ids)} tasks successfully")
-        
+
         # 并发等待所有任务完成
         logger.info(f"⏳ Waiting for all tasks to complete...")
         wait_tasks = [
-            client.wait_for_task(session, task_id) 
+            client.wait_for_task(session, task_id)
             for task_id in task_ids
         ]
         final_results = await asyncio.gather(*wait_tasks)
-        
+
+        # 儲存完成的結果到本地
+        logger.info("")
+        logger.info("💾 Saving results...")
+        for i, status in enumerate(final_results):
+            if status.get('status') == 'completed':
+                filename = Path(submitted[i][1]).stem  # 使用原始檔名
+                client.save_result(status, output_dir=output_dir, filename=filename)
+
         # 统计结果
         completed = sum(1 for r in final_results if r.get('status') == 'completed')
         failed = sum(1 for r in final_results if r.get('status') == 'failed')
-        
+
+        logger.info("")
         logger.info("=" * 60)
         logger.info(f"📊 Results: {completed} completed, {failed} failed")
         logger.info("=" * 60)
-        
+
         return final_results
 
 
@@ -271,30 +353,50 @@ async def example_queue_monitoring():
 
 async def main():
     """主函数"""
-    import sys
-    
-    if len(sys.argv) > 1:
-        example = sys.argv[1]
-    else:
-        example = 'all'
-    
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description='MinerU Tianshu 客戶端範例',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+使用範例:
+  # 批次處理 pdfs 目錄下所有檔案
+  python client_example.py batch
+
+  # 指定輸入和輸出目錄
+  python client_example.py batch --input-dir ./my_docs --output-dir ./results
+
+  # 監控佇列狀態
+  python client_example.py monitor
+        """
+    )
+
+    parser.add_argument('command', nargs='?', default='batch',
+                        choices=['batch', 'single', 'priority', 'monitor'],
+                        help='要執行的範例 (預設: batch)')
+    parser.add_argument('--input-dir', '-i', type=str, default='./pdfs',
+                        help='輸入目錄 (預設: ./pdfs)')
+    parser.add_argument('--output-dir', '-o', type=str, default='./output',
+                        help='輸出目錄 (預設: ./output)')
+
+    args = parser.parse_args()
+
     try:
-        if example == 'single' or example == 'all':
+        if args.command == 'single':
             await example_single_task()
-            print()
-        
-        if example == 'batch' or example == 'all':
-            await example_batch_tasks()
-            print()
-        
-        if example == 'priority' or example == 'all':
+
+        elif args.command == 'batch':
+            await example_batch_tasks(
+                input_dir=args.input_dir,
+                output_dir=args.output_dir
+            )
+
+        elif args.command == 'priority':
             await example_priority_tasks()
-            print()
-        
-        if example == 'monitor' or example == 'all':
+
+        elif args.command == 'monitor':
             await example_queue_monitoring()
-            print()
-            
+
     except Exception as e:
         logger.error(f"Example failed: {e}")
         import traceback
@@ -304,15 +406,18 @@ async def main():
 if __name__ == '__main__':
     """
     使用方法:
-    
-    # 运行所有示例
+
+    # 批次處理 pdfs 目錄（預設）
     python client_example.py
-    
-    # 运行特定示例
-    python client_example.py single
-    python client_example.py batch
-    python client_example.py priority
+
+    # 指定輸入和輸出目錄
+    python client_example.py batch -i ./my_docs -o ./results
+
+    # 監控佇列狀態
     python client_example.py monitor
+
+    # 查看幫助
+    python client_example.py --help
     """
     asyncio.run(main())
 

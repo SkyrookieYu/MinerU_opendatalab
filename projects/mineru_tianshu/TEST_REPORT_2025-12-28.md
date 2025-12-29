@@ -249,6 +249,29 @@ os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
 
 **驗證結果**: 2025-12-29 測試通過，Ctrl+C 可完整關閉所有服務
 
+### 問題 5: client_example.py 功能不完整（已修復）
+
+**現象**:
+- 完成任務後只顯示伺服器路徑，不儲存結果到本地
+- 檔案列表寫死在程式碼中，無法自動掃描目錄
+
+**解決方案**:
+1. 新增 `save_result()` 方法，完成後自動存檔到本地
+2. `example_batch_tasks()` 改為自動掃描指定目錄
+3. 支援命令列參數指定輸入/輸出目錄
+4. 自動排除 Windows Zone.Identifier 檔案
+
+**使用方式**:
+```bash
+# 預設處理 ./pdfs 目錄
+python client_example.py
+
+# 指定目錄
+python client_example.py batch -i ./my_docs -o ./results
+```
+
+**驗證結果**: 2025-12-29 測試通過
+
 ---
 
 ## 後續行動
@@ -256,5 +279,5 @@ os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
 - [ ] 考慮是否新增 ZIP 打包下載 API
 - [ ] 評估 MinIO 部署的可行性
 - [ ] 修改輸出目錄到持久位置
-- [ ] 更新 client_example.py 的範例程式碼
 - [x] 修復 Ctrl+C 無法完整關閉服務的問題
+- [x] 更新 client_example.py 完整功能（自動掃描目錄、存檔結果）
