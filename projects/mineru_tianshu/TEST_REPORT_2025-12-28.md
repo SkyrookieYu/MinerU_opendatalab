@@ -223,9 +223,38 @@ if status.get('data'):
 
 ---
 
+## 已解決的問題
+
+### 問題 4: Ctrl+C 無法完整關閉所有服務（已修復）
+
+**現象**:
+- 按 Ctrl+C 只會關閉 FastAPI 伺服器
+- LitServe Worker 的子進程會變成孤兒進程繼續運行
+- 需要手動 `kill` 才能完全停止
+
+**原因**:
+- `subprocess.Popen` 啟動的子進程會產生孫進程（如 GPU Workers）
+- `proc.terminate()` 只會終止直接子進程，不會終止孫進程
+
+**解決方案**:
+修改 `start_all.py`，使用進程組管理：
+
+```python
+# 1. 啟動時創建獨立進程組
+subprocess.Popen(..., start_new_session=True)
+
+# 2. 終止時殺死整個進程組
+os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+```
+
+**驗證結果**: 2025-12-29 測試通過，Ctrl+C 可完整關閉所有服務
+
+---
+
 ## 後續行動
 
 - [ ] 考慮是否新增 ZIP 打包下載 API
 - [ ] 評估 MinIO 部署的可行性
 - [ ] 修改輸出目錄到持久位置
 - [ ] 更新 client_example.py 的範例程式碼
+- [x] 修復 Ctrl+C 無法完整關閉服務的問題
