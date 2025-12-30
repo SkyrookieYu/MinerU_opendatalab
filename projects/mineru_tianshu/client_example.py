@@ -283,7 +283,7 @@ async def example_single_task():
     logger.info("=" * 60)
 
     client = TianshuClient()
-    file_path = '../../demo/pdfs/demo1.pdf'
+    file_path = './pdfs/w101-126.pdf'
 
     async with aiohttp.ClientSession() as session:
         # 提交任务
@@ -303,10 +303,9 @@ async def example_single_task():
             logger.info(f"⏳ Waiting for task {task_id} to complete...")
             final_status = await client.wait_for_task(session, task_id)
 
-            # 儲存結果到本地
+            # 下載結果到本地（包含 Markdown + 圖片）
             if final_status.get('status') == 'completed':
-                filename = Path(file_path).stem  # 使用原始檔名
-                client.save_result(final_status, output_dir='./output', filename=filename)
+                await client.download_result(session, task_id, output_dir='./output')
 
             return final_status
 
@@ -367,13 +366,13 @@ async def example_batch_tasks(input_dir: str = './pdfs', output_dir: str = './ou
         ]
         final_results = await asyncio.gather(*wait_tasks)
 
-        # 儲存完成的結果到本地
+        # 下載完成的結果到本地（包含 Markdown + 圖片）
         logger.info("")
-        logger.info("💾 Saving results...")
+        logger.info("📦 Downloading results...")
         for i, status in enumerate(final_results):
             if status.get('status') == 'completed':
-                filename = Path(submitted[i][1]).stem  # 使用原始檔名
-                client.save_result(status, output_dir=output_dir, filename=filename)
+                task_id = submitted[i][0]
+                await client.download_result(session, task_id, output_dir=output_dir)
 
         # 统计结果
         completed = sum(1 for r in final_results if r.get('status') == 'completed')

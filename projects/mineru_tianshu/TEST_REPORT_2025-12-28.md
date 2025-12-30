@@ -272,6 +272,46 @@ python client_example.py batch -i ./my_docs -o ./results
 
 **驗證結果**: 2025-12-29 測試通過
 
+### 問題 6: client_example.py batch/single 命令不下載圖片（已修復）
+
+**現象**:
+- 執行 `python client_example.py batch` 只會儲存 Markdown 檔案
+- 圖片沒有被下載，導致 Markdown 中的圖片引用無法顯示
+
+**原因**:
+- `example_batch_tasks()` 和 `example_single_task()` 使用 `save_result()` 方法
+- `save_result()` 只從 API 回應中取得 Markdown 文字內容
+- 沒有呼叫 ZIP 下載 API 來取得圖片
+
+**解決方案**:
+修改 `client_example.py`，將 `save_result()` 改為 `download_result()`：
+
+```python
+# 修改前 (example_single_task)
+client.save_result(final_status, output_dir='./output', filename=filename)
+
+# 修改後
+await client.download_result(session, task_id, output_dir='./output')
+
+# 修改前 (example_batch_tasks)
+client.save_result(status, output_dir=output_dir, filename=filename)
+
+# 修改後
+await client.download_result(session, task_id, output_dir=output_dir)
+```
+
+**修改後的行為**:
+
+| 命令 | 修改前 | 修改後 |
+|------|--------|--------|
+| `batch` | 只有 .md | .md + images/ |
+| `single` | 只有 .md | .md + images/ |
+| `download` | .md + images/ | .md + images/ |
+
+**備註**: `save_result()` 方法保留，供日後只需要 Markdown 文字的場景使用
+
+**驗證結果**: 2025-12-30 修改完成
+
 ---
 
 ## 後續行動
@@ -281,3 +321,4 @@ python client_example.py batch -i ./my_docs -o ./results
 - [ ] 修改輸出目錄到持久位置
 - [x] 修復 Ctrl+C 無法完整關閉服務的問題
 - [x] 更新 client_example.py 完整功能（自動掃描目錄、存檔結果）
+- [x] 修復 client_example.py batch/single 不下載圖片的問題

@@ -124,3 +124,45 @@ Client Request → FastAPI Server (immediate task_id return)
 - Result files are cleaned after 7 days by default but database records persist
 - The scheduler is **optional** - workers operate independently with pull-based model
 - Default poll interval is 0.5s for fast task pickup
+
+## MinerU JSON Output Formats
+
+MinerU generates three JSON files when parsing PDFs, representing different processing stages:
+
+```
+PDF Input
+    ↓
+┌─────────────────────────────────────────────────────────────┐
+│  ① model.json (Raw Model Output)                            │
+│     Raw detection results from Layout/OCR/Formula/Table     │
+└─────────────────────────────────────────────────────────────┘
+    ↓  result_to_middle_json()
+┌─────────────────────────────────────────────────────────────┐
+│  ② middle.json (Unified Intermediate Format)                │
+│     Cross-backend standardized format with structured data  │
+└─────────────────────────────────────────────────────────────┘
+    ↓  union_make()
+┌─────────────────────────────────────────────────────────────┐
+│  ③ content_list.json (Final Structured Output)              │
+│     Simplified content list for RAG/search applications     │
+└─────────────────────────────────────────────────────────────┘
+    ↓
+Markdown Output
+```
+
+| File | Stage | Granularity | Primary Use |
+|------|-------|-------------|-------------|
+| `xxx_model.json` | Raw | Bounding boxes + coords | Debugging, visualization |
+| `xxx_middle.json` | Intermediate | Line/span level | Post-processing, cross-page merge |
+| `xxx_content_list.json` | Final | Block level | RAG, search, API response |
+
+### content_list.json Type Reference
+
+| type | Description |
+|------|-------------|
+| `text` | Body text content |
+| `title` | Heading/title |
+| `table` | Table (with HTML) |
+| `image` | Image path |
+| `equation` | Formula (LaTeX) |
+| `discarded` | Discarded content (headers/footers/watermarks) |
