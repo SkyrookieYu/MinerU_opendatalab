@@ -5,7 +5,9 @@ MinerU Tianshu - API Server
 提供RESTful API接口用于任务提交、查询和管理
 """
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+import zipfile
+import io
 from fastapi.middleware.cors import CORSMiddleware
 import tempfile
 from pathlib import Path
@@ -603,6 +605,105 @@ async def get_task_status(
         logger.info(f"ℹ️  Task status is {task['status']}, skipping content loading")
     
     return response
+
+
+@app.get("/api/v1/tasks/{task_id}/download")
+async def download_task_result(task_id: str):
+    """
+    下載任務結果 ZIP 檔案
+
+    將 Markdown 檔案和 images 目錄打包成 ZIP 檔案下載，
+    讓遠端 Client 可以取得完整的解析結果（包含圖片）。
+
+    ZIP 內容結構：
+    - {filename}.md - Markdown 檔案
+    - images/ - 圖片目錄（如果有的話）
+    """
+    # 檢查任務是否存在
+    task = db.get_task(task_id)
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # 檢查任務狀態
+    if task['status'] != 'completed':
+        raise HTTPException(
+            status_code=400,
+            detail=f"Task is in '{task['status']}' status. Only completed tasks can be downloaded."
+        )
+
+    # 檢查結果路徑
+    if not task['result_path']:
+        raise HTTPException(
+            status_code=410,
+            detail="Task completed but result files have been cleaned up (older than retention period)"
+        )
+
+    result_dir = Path(task['result_path'])
+    if not result_dir.exists():
+        raise HTTPException(
+            status_code=410,
+            detail="Result directory does not exist (files may have been cleaned up)"
+        )
+
+    # 查找 Markdown 檔案
+    md_files = list(result_dir.rglob('*.md'))
+    # 排除帶特殊後綴的 md 檔案
+    md_files = [f for f in md_files if not any(f.stem.endswith(suffix) for suffix in ['_layout', '_span', '_origin'])]
+
+    if not md_files:
+        raise HTTPException(
+            status_code=404,
+            detail="No markdown files found in result directory"
+        )
+
+    md_file = md_files[0]
+    image_dir = md_file.parent / 'images'
+
+    # 建立 ZIP 檔案（在記憶體中）
+    zip_buffer = io.BytesIO()
+
+    try:
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            # 加入 Markdown 檔案
+            zip_file.write(md_file, md_file.name)
+            logger.info(f"📄 Added to ZIP: {md_file.name}")
+
+            # 加入圖片目錄（如果存在）
+            if image_dir.exists() and image_dir.is_dir():
+                image_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg'}
+                image_count = 0
+
+                for img_file in image_dir.iterdir():
+                    if img_file.is_file() and img_file.suffix.lower() in image_extensions:
+                        # 保持 images/ 目錄結構
+                        arcname = f"images/{img_file.name}"
+                        zip_file.write(img_file, arcname)
+                        image_count += 1
+
+                logger.info(f"🖼️  Added {image_count} images to ZIP")
+
+        # 重置 buffer 位置
+        zip_buffer.seek(0)
+
+        # 生成下載檔名
+        base_name = Path(task['file_name']).stem
+        zip_filename = f"{base_name}_result.zip"
+
+        logger.info(f"✅ ZIP file created for task {task_id}: {zip_filename}")
+
+        # 回傳 ZIP 檔案
+        return StreamingResponse(
+            zip_buffer,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{zip_filename}"'
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Failed to create ZIP for task {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create ZIP file: {e}")
 
 
 @app.delete("/api/v1/tasks/{task_id}")

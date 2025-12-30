@@ -276,7 +276,7 @@ python client_example.py batch -i ./my_docs -o ./results
 
 ## 後續行動
 
-- [ ] 考慮是否新增 ZIP 打包下載 API
+- [x] 考慮是否新增 ZIP 打包下載 API（已實作 `GET /api/v1/tasks/{task_id}/download`）
 - [ ] 評估 MinIO 部署的可行性
 - [ ] 修改輸出目錄到持久位置
 - [x] 修復 Ctrl+C 無法完整關閉服務的問題

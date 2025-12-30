@@ -106,6 +106,7 @@ curl http://localhost:8000/api/v1/tasks/{task_id}
 |------|------|------|
 | POST | `/api/v1/tasks/submit` | 提交檔案進行解析 |
 | GET | `/api/v1/tasks/{task_id}` | 取得狀態（完成時自動回傳內容） |
+| GET | `/api/v1/tasks/{task_id}/download` | 下載 ZIP 檔案（Markdown + 圖片） |
 | GET | `/api/v1/queue/stats` | 佇列統計 |
 | DELETE | `/api/v1/tasks/{task_id}` | 取消待處理任務 |
 | POST | `/api/v1/admin/reset-stale` | 重置逾時任務 |

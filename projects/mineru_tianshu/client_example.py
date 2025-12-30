@@ -148,6 +148,89 @@ class TianshuClient:
         async with session.delete(f'{self.base_url}/tasks/{task_id}') as resp:
             return await resp.json()
 
+    async def download_result(
+        self,
+        session: aiohttp.ClientSession,
+        task_id: str,
+        output_dir: str = './output',
+        extract: bool = True
+    ) -> Optional[str]:
+        """
+        下載任務結果 ZIP 檔案
+
+        Args:
+            session: aiohttp session
+            task_id: 任務 ID
+            output_dir: 輸出目錄
+            extract: 是否解壓縮 ZIP（預設 True）
+
+        Returns:
+            下載的檔案路徑（ZIP 或解壓縮目錄），失敗時返回 None
+        """
+        import zipfile
+        import io
+
+        url = f'{self.base_url}/tasks/{task_id}/download'
+
+        try:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    # 從 header 取得檔名
+                    content_disposition = resp.headers.get('Content-Disposition', '')
+                    if 'filename=' in content_disposition:
+                        zip_filename = content_disposition.split('filename=')[1].strip('"')
+                    else:
+                        zip_filename = f'{task_id}_result.zip'
+
+                    # 建立輸出目錄
+                    output_path = Path(output_dir)
+                    output_path.mkdir(parents=True, exist_ok=True)
+
+                    # 讀取 ZIP 內容
+                    zip_content = await resp.read()
+
+                    if extract:
+                        # 解壓縮到輸出目錄
+                        extract_dir = output_path / zip_filename.replace('_result.zip', '')
+                        extract_dir.mkdir(parents=True, exist_ok=True)
+
+                        with zipfile.ZipFile(io.BytesIO(zip_content)) as zf:
+                            zf.extractall(extract_dir)
+
+                        # 計算解壓縮的檔案數量
+                        files = list(extract_dir.rglob('*'))
+                        file_count = len([f for f in files if f.is_file()])
+
+                        logger.info(f"📦 Downloaded & extracted: {extract_dir} ({file_count} files)")
+                        return str(extract_dir)
+                    else:
+                        # 直接儲存 ZIP 檔案
+                        zip_path = output_path / zip_filename
+                        zip_path.write_bytes(zip_content)
+
+                        logger.info(f"📦 Downloaded: {zip_path} ({len(zip_content):,} bytes)")
+                        return str(zip_path)
+
+                elif resp.status == 400:
+                    error = await resp.json()
+                    logger.warning(f"⚠️  Cannot download: {error.get('detail')}")
+                    return None
+                elif resp.status == 404:
+                    logger.error(f"❌ Task not found: {task_id}")
+                    return None
+                elif resp.status == 410:
+                    error = await resp.json()
+                    logger.warning(f"⚠️  Result expired: {error.get('detail')}")
+                    return None
+                else:
+                    error = await resp.text()
+                    logger.error(f"❌ Download failed ({resp.status}): {error}")
+                    return None
+
+        except Exception as e:
+            logger.error(f"❌ Download error: {e}")
+            return None
+
     def save_result(
         self,
         status: Dict,
@@ -237,7 +320,7 @@ async def example_batch_tasks(input_dir: str = './pdfs', output_dir: str = './ou
     client = TianshuClient()
 
     # 支援的檔案格式
-    supported_extensions = {'.pdf', '.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls', '.html', '.htm', '.png', '.jpg', '.jpeg'}
+    supported_extensions = {'.epub', '.pdf', '.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls', '.html', '.htm', '.png', '.jpg', '.jpeg'}
 
     # 遍歷目錄下所有支援的檔案
     input_path = Path(input_dir)
@@ -338,17 +421,56 @@ async def example_queue_monitoring():
     logger.info("=" * 60)
     logger.info("示例4：监控队列状态")
     logger.info("=" * 60)
-    
+
     client = TianshuClient()
-    
+
     async with aiohttp.ClientSession() as session:
         # 获取队列统计
         stats = await client.get_queue_stats(session)
-        
+
         logger.info("📊 Queue Statistics:")
         logger.info(f"   Total: {stats.get('total', 0)}")
         for status, count in stats.get('stats', {}).items():
             logger.info(f"   {status:12s}: {count}")
+
+
+async def example_download_task(task_id: str, output_dir: str = './output', extract: bool = True):
+    """示例5：下載任務結果 ZIP（包含 Markdown + 圖片）"""
+    logger.info("=" * 60)
+    logger.info("示例5：下載任務結果")
+    logger.info("=" * 60)
+
+    client = TianshuClient()
+
+    async with aiohttp.ClientSession() as session:
+        # 先檢查任務狀態
+        status = await client.get_task_status(session, task_id)
+
+        if not status.get('success'):
+            logger.error(f"❌ Task not found: {task_id}")
+            return None
+
+        task_status = status.get('status')
+        logger.info(f"📋 Task {task_id}")
+        logger.info(f"   File: {status.get('file_name')}")
+        logger.info(f"   Status: {task_status}")
+
+        if task_status != 'completed':
+            logger.warning(f"⚠️  Task is not completed yet (status: {task_status})")
+            return None
+
+        # 下載 ZIP
+        result_path = await client.download_result(
+            session,
+            task_id,
+            output_dir=output_dir,
+            extract=extract
+        )
+
+        if result_path:
+            logger.info(f"✅ Result saved to: {result_path}")
+
+        return result_path
 
 
 async def main():
@@ -366,18 +488,28 @@ async def main():
   # 指定輸入和輸出目錄
   python client_example.py batch --input-dir ./my_docs --output-dir ./results
 
+  # 下載特定任務的結果（包含 Markdown + 圖片）
+  python client_example.py download <task_id>
+
+  # 下載但不解壓縮（保留 ZIP 檔案）
+  python client_example.py download <task_id> --no-extract
+
   # 監控佇列狀態
   python client_example.py monitor
         """
     )
 
     parser.add_argument('command', nargs='?', default='batch',
-                        choices=['batch', 'single', 'priority', 'monitor'],
+                        choices=['batch', 'single', 'priority', 'monitor', 'download'],
                         help='要執行的範例 (預設: batch)')
+    parser.add_argument('task_id', nargs='?', default=None,
+                        help='任務 ID（download 命令使用）')
     parser.add_argument('--input-dir', '-i', type=str, default='./pdfs',
                         help='輸入目錄 (預設: ./pdfs)')
     parser.add_argument('--output-dir', '-o', type=str, default='./output',
                         help='輸出目錄 (預設: ./output)')
+    parser.add_argument('--no-extract', action='store_true',
+                        help='下載時不解壓縮 ZIP（預設會解壓縮）')
 
     args = parser.parse_args()
 
@@ -397,6 +529,16 @@ async def main():
         elif args.command == 'monitor':
             await example_queue_monitoring()
 
+        elif args.command == 'download':
+            if not args.task_id:
+                logger.error("❌ 請提供 task_id，例如: python client_example.py download <task_id>")
+                return
+            await example_download_task(
+                task_id=args.task_id,
+                output_dir=args.output_dir,
+                extract=not args.no_extract
+            )
+
     except Exception as e:
         logger.error(f"Example failed: {e}")
         import traceback
@@ -412,6 +554,12 @@ if __name__ == '__main__':
 
     # 指定輸入和輸出目錄
     python client_example.py batch -i ./my_docs -o ./results
+
+    # 下載特定任務的結果（包含 Markdown + 圖片）
+    python client_example.py download <task_id>
+
+    # 下載但不解壓縮（保留 ZIP 檔案）
+    python client_example.py download <task_id> --no-extract
 
     # 監控佇列狀態
     python client_example.py monitor

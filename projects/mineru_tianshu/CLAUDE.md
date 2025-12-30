@@ -106,6 +106,7 @@ Client Request → FastAPI Server (immediate task_id return)
 |--------|----------|-------------|
 | POST | `/api/v1/tasks/submit` | Submit file for parsing |
 | GET | `/api/v1/tasks/{task_id}` | Get status (auto-returns content when complete) |
+| GET | `/api/v1/tasks/{task_id}/download` | Download ZIP file (Markdown + images) |
 | GET | `/api/v1/queue/stats` | Queue statistics |
 | DELETE | `/api/v1/tasks/{task_id}` | Cancel pending task |
 | POST | `/api/v1/admin/reset-stale` | Reset timed-out tasks |
