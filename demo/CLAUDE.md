@@ -128,9 +128,14 @@ demo/
 └── output_*/               # 各種測試輸出目錄
 ```
 
-## 相依套件
+## 環境設定
 
-此目錄的腳本依賴主專案 MinerU，需先安裝：
+此專案使用 conda 環境：
+```bash
+conda activate mineru_2_6_7
+```
+
+主專案 MinerU 需先安裝：
 ```bash
 cd /home/cobra/projects/MinerU_opendatalab
 pip install -e ".[pipeline]"
