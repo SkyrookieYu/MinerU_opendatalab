@@ -8,6 +8,15 @@ MinerU is a PDF-to-Markdown conversion tool developed by OpenDataLab. It support
 - **pipeline**: Traditional ML pipeline using layout detection, OCR, formula recognition, and table parsing
 - **vlm**: Vision-Language Model backend using the MinerU2.5 model (1.2B parameters)
 
+## 環境設定
+
+此專案使用 conda 環境：
+```bash
+conda activate mineru_2_6_7
+```
+
+> **注意**: `projects/mineru_tianshu` 子專案使用獨立的 `mineru_tianshu` conda 環境。
+
 ## Commands
 
 ### Installation
