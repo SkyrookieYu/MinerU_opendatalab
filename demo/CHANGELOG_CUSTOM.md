@@ -1742,7 +1742,7 @@ MinerU_opendatalab/
 
 ---
 
-## 功能總結（最終版）
+## 功能總結
 
 | 功能 | 參數/檔案 | 說明 |
 |------|----------|------|
@@ -1753,3 +1753,320 @@ MinerU_opendatalab/
 | 異步 API | `api.py` | RESTful API，異步任務模式 |
 | 效能統計 | `test_api.py` | 時間統計，效能比較 |
 | 簡易客戶端 | `simple_client.py` | 同事快速上手使用 |
+| **批次處理系統** | `batch_api.py` + `batch_client.py` | SQLite 持久化隊列、多 Worker、並發處理 |
+
+---
+
+## 功能九：批次處理系統 (Batch Processing System)
+
+### 功能說明
+
+參考 `mineru_tianshu` 專案架構，實作企業級批次處理系統：
+
+- **SQLite 持久化隊列**：任務不會因重啟丟失
+- **多 Worker 並發處理**：可配置 Worker 數量
+- **優先級排序**：高優先級任務優先處理
+- **原子性任務分配**：防止多 Worker 重複處理同一任務
+- **自動故障恢復**：超時任務自動重置為待處理
+- **異步批次客戶端**：使用 `asyncio` + `aiohttp` 實現並發提交
+
+### 系統架構
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  batch_client.py (異步客戶端)                                │
+│  - asyncio.gather() 並發提交                                 │
+│  - 滑動視窗控制並發數                                         │
+│  - 支援優先級設定                                            │
+└───────────────┬─────────────────────────────────────────────┘
+                │ HTTP (aiohttp)
+                ▼
+┌─────────────────────────────────────────────────────────────┐
+│  batch_api.py (FastAPI 服務器)                               │
+│  - 接收任務，寫入 SQLite                                      │
+│  - 立即返回 task_id                                          │
+│  - Worker Pool 背景處理                                       │
+└───────────────┬─────────────────────────────────────────────┘
+                │
+                ▼
+┌─────────────────────────────────────────────────────────────┐
+│  task_db.py (SQLite 任務資料庫)                              │
+│  - 原子性任務分配 (BEGIN IMMEDIATE)                           │
+│  - 優先級排序 (priority DESC)                                 │
+│  - 狀態追蹤 (pending/processing/completed/failed)            │
+└───────────────┬─────────────────────────────────────────────┘
+                │
+                ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Worker Pool (可配置數量)                                     │
+│  - 每個 Worker 獨立執行緒                                     │
+│  - 主動輪詢拉取任務 (0.5 秒間隔)                               │
+│  - 調用 parse_doc_by_physical_page() 處理                     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 新增檔案
+
+| 檔案 | 說明 |
+|------|------|
+| `task_db.py` | SQLite 任務資料庫管理，提供原子性操作 |
+| `batch_api.py` | FastAPI 批次處理 API 服務器 |
+| `batch_client.py` | 異步批次客戶端（並發提交 + 滑動視窗） |
+
+---
+
+### task_db.py - SQLite 任務資料庫
+
+#### 資料庫表結構
+
+```sql
+CREATE TABLE tasks (
+    task_id TEXT PRIMARY KEY,
+    file_name TEXT NOT NULL,
+    file_path TEXT,
+    status TEXT DEFAULT 'pending',
+    priority INTEGER DEFAULT 0,
+    backend TEXT DEFAULT 'pipeline',
+    options TEXT,                          -- JSON 格式
+    result TEXT,                           -- JSON 格式
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    worker_id TEXT,
+    retry_count INTEGER DEFAULT 0
+);
+
+-- 索引
+CREATE INDEX idx_status ON tasks(status);
+CREATE INDEX idx_priority ON tasks(priority DESC);
+```
+
+#### 核心方法
+
+```python
+from task_db import TaskDB
+
+db = TaskDB("mineru_batch.db")
+
+# 建立任務
+task_id = db.create_task(
+    file_name="document.pdf",
+    file_path="/path/to/file.pdf",
+    backend="pipeline",
+    priority=10,  # 越高越優先
+)
+
+# 原子性取得下一個待處理任務（防止重複）
+task = db.get_next_task(worker_id="worker-1")
+
+# 更新任務狀態
+db.update_task_status(task_id, "completed", result=[...])
+db.update_task_status(task_id, "failed", error_message="錯誤訊息")
+
+# 隊列統計
+stats = db.get_queue_stats()
+# {'pending': 5, 'processing': 2, 'completed': 10, 'failed': 1}
+
+# 維護操作
+db.reset_stale_tasks(timeout_minutes=60)  # 重置超時任務
+db.cleanup_old_tasks(days=7)               # 清理舊任務
+```
+
+---
+
+### batch_api.py - 批次處理 API 服務器
+
+#### 啟動方式
+
+```bash
+# 預設 4 個 Worker
+python batch_api.py
+
+# 自訂 Worker 數量
+python batch_api.py --workers 8
+
+# 使用 uvicorn（生產環境）
+uvicorn batch_api:app --host 0.0.0.0 --port 8000
+```
+
+#### API 端點
+
+| 端點 | 方法 | 說明 |
+|------|------|------|
+| `/api/v1/parse` | POST | 提交 PDF 任務（相容原 api.py） |
+| `/api/v1/result/{task_id}` | GET | 取得結果（相容原 api.py） |
+| `/api/v1/tasks/{task_id}` | GET | 詳細任務資訊 |
+| `/api/v1/tasks/{task_id}` | DELETE | 取消待處理任務 |
+| `/api/v1/queue/stats` | GET | 隊列統計 |
+| `/api/v1/queue/tasks` | GET | 列出任務（支援分頁） |
+| `/api/v1/health` | GET | 健康檢查 |
+| `/api/v1/admin/reset-stale` | POST | 重置超時任務 |
+| `/api/v1/admin/cleanup` | POST | 清理舊任務 |
+
+#### 提交任務（支援優先級）
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/parse" \
+  -F "file=@document.pdf" \
+  -F "priority=10" \
+  -F "backend=pipeline"
+```
+
+#### 隊列統計
+
+```bash
+curl "http://localhost:8000/api/v1/queue/stats"
+```
+
+回應：
+```json
+{
+  "success": true,
+  "stats": {
+    "pending": 5,
+    "processing": 2,
+    "completed": 10,
+    "failed": 1
+  },
+  "total": 18,
+  "workers": 4,
+  "timestamp": "2026-01-02T10:30:45.123456"
+}
+```
+
+---
+
+### batch_client.py - 異步批次客戶端
+
+#### 使用方式
+
+```bash
+# 安裝依賴
+pip install aiohttp
+
+# 測試 pdfs/ 目錄（預設同時 3 個）
+python batch_client.py
+
+# 同時處理 5 個
+python batch_client.py --max-concurrent 5
+
+# 設定高優先級
+python batch_client.py --priority 10
+
+# 只顯示隊列統計
+python batch_client.py --stats
+
+# 指定多個 PDF
+python batch_client.py --pdf doc1.pdf doc2.pdf doc3.pdf
+```
+
+#### 滑動視窗模式
+
+```
+初始狀態（max_concurrent=3）：
+┌─────────────────────────────────────────────┐
+│  [處理中] pdf1, pdf2, pdf3                   │
+│  [待處理] pdf4, pdf5, pdf6, pdf7             │
+└─────────────────────────────────────────────┘
+           ↓ pdf2 完成
+┌─────────────────────────────────────────────┐
+│  [處理中] pdf1, pdf3, pdf4 (自動補充)        │
+│  [待處理] pdf5, pdf6, pdf7                   │
+└─────────────────────────────────────────────┘
+```
+
+#### 輸出範例
+
+```
+============================================================
+MinerU PDF 解析 API 批次客戶端
+============================================================
+API 伺服器:     http://localhost:8000
+輸出目錄:       output_results
+最大同時處理:   3
+PDF 檔案:       4 個
+
+============================================================
+開始批次處理 (4 個檔案, 最多 3 個同時)
+============================================================
+✅ 伺服器連線正常 (Workers: 4)
+
+  [10:30:01] 📤 提交: demo1.pdf (task_id: 550e8400...)
+             狀態: 1 處理中, 3 待處理
+  [10:30:01] 📤 提交: demo2.pdf (task_id: 661f9511...)
+             狀態: 2 處理中, 2 待處理
+  [10:30:02] 📤 提交: demo3.pdf (task_id: 772a0622...)
+             狀態: 3 處理中, 1 待處理
+  [10:30:18] ✅ 完成: demo2.pdf (16.5 秒)
+             進度: 1/4
+  [10:30:18] 📤 提交: small_ocr.pdf (task_id: 883b1733...)
+             狀態: 3 處理中, 0 待處理
+  [10:30:35] ✅ 完成: demo3.pdf (33.2 秒)
+             進度: 2/4
+  [10:30:42] ✅ 完成: small_ocr.pdf (24.1 秒)
+             進度: 3/4
+  [10:30:58] ✅ 完成: demo1.pdf (56.8 秒)
+             進度: 4/4
+
+============================================================
+處理完成!
+============================================================
+總計:   4 個檔案
+成功:   4 個
+失敗:   0 個
+總耗時: 57.2 秒
+平均:   14.3 秒/檔案
+
+詳細結果:
+  ✅ demo1.pdf: 13 頁 (56.8 秒)
+  ✅ demo2.pdf: 6 頁 (16.5 秒)
+  ✅ demo3.pdf: 10 頁 (33.2 秒)
+  ✅ small_ocr.pdf: 8 頁 (24.1 秒)
+
+結果已儲存到: output_results/
+```
+
+---
+
+### 與原 api.py 的比較
+
+| 特性 | api.py | batch_api.py |
+|------|--------|--------------|
+| 任務儲存 | 記憶體 (dict) | SQLite 持久化 |
+| Worker 數量 | 固定 2 個 | 可配置（預設 4） |
+| 任務分配 | ThreadPoolExecutor | 原子性資料庫操作 |
+| 重啟後任務 | 丟失 | 保留 |
+| 隊列統計 | 基本 | 完整統計 + 列表 |
+| 優先級 | 不支援 | 支援 |
+| 故障恢復 | 不支援 | 自動重置超時任務 |
+
+### 與 simple_client.py 的比較
+
+| 特性 | simple_client.py | batch_client.py |
+|------|------------------|-----------------|
+| 依賴 | requests | aiohttp |
+| 處理模式 | 串列（一個一個） | 並發（滑動視窗） |
+| 最大同時 | 1 | 可配置（預設 3） |
+| 優先級 | 不支援 | 支援 |
+| 隊列統計 | 不支援 | 支援 `--stats` |
+
+---
+
+### 檔案變更總覽（更新）
+
+```
+MinerU_opendatalab/
+├── demo/
+│   ├── task_db.py              [新增] SQLite 任務資料庫管理
+│   ├── batch_api.py            [新增] 批次處理 API 服務器
+│   ├── batch_client.py         [新增] 異步批次客戶端
+│   ├── api.py                  [既有] 簡易 API（記憶體儲存）
+│   ├── simple_client.py        [既有] 簡易客戶端（串列處理）
+│   ├── demo.py                 [既有] 核心解析函數
+│   ├── CHANGELOG_CUSTOM.md     [更新] 本變更紀錄文件
+│   └── mineru_batch.db         [新增] SQLite 資料庫檔案
+│
+└── mineru/
+    └── (既有修改，見功能一至五)
+```
