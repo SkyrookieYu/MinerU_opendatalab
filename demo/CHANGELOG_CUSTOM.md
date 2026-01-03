@@ -209,48 +209,10 @@ Fig. 1. Description...
 
 ---
 
-## 功能三：統一輸出介面 (output_format)
+## 功能三：客戶端 JSON 輸出格式 (client_json)
 
 ### 功能說明
-透過 `output_format` 參數統一控制輸出格式，支援 Markdown、純文字、客戶端 JSON 三種格式。
-
-### 支援的格式
-
-| 格式值 | 輸出檔案 | 說明 |
-|--------|----------|------|
-| `"markdown"` | `.md` | 預設，標準 Markdown |
-| `"plaintext"` | `.txt` | 純文字，移除所有格式 |
-| `"client_json"` | `.json` | 分頁 JSON：`[{pageNo, words}, ...]` |
-
-### 使用方式
-
-```python
-from demo import parse_doc
-
-# Markdown 輸出 (預設)
-parse_doc(doc_path_list, output_dir)
-
-# 純文字輸出
-parse_doc(doc_path_list, output_dir, output_format="plaintext")
-
-# 客戶端 JSON 輸出
-parse_doc(doc_path_list, output_dir, output_format="client_json")
-
-# 組合使用：版權限制 + JSON 輸出
-parse_doc(
-    doc_path_list,
-    output_dir,
-    disable_image_extract=True,
-    output_format="client_json"
-)
-```
-
----
-
-## 功能四：客戶端 JSON 輸出格式 (client_json)
-
-### 功能說明
-根據客戶端需求，提供分頁的純文字 JSON 輸出格式。
+根據客戶端需求，提供分頁的純文字 JSON 輸出格式。此功能是後續統一輸出介面 (output_format) 的基礎。
 
 ### 輸出格式
 
@@ -304,6 +266,44 @@ def make_client_json(pdf_info, make_func, f_make_md_mode, image_dir):
     "words": "某种特殊的商品，例如一夸特小麦..."
   }
 ]
+```
+
+---
+
+## 功能四：統一輸出介面 (output_format)
+
+### 功能說明
+基於客戶端 JSON 格式需求，透過 `output_format` 參數統一控制輸出格式，支援 Markdown、純文字、客戶端 JSON 三種格式。
+
+### 支援的格式
+
+| 格式值 | 輸出檔案 | 說明 |
+|--------|----------|------|
+| `"markdown"` | `.md` | 預設，標準 Markdown |
+| `"plaintext"` | `.txt` | 純文字，移除所有格式 |
+| `"client_json"` | `.json` | 分頁 JSON：`[{pageNo, words}, ...]` |
+
+### 使用方式
+
+```python
+from demo import parse_doc
+
+# Markdown 輸出 (預設)
+parse_doc(doc_path_list, output_dir)
+
+# 純文字輸出
+parse_doc(doc_path_list, output_dir, output_format="plaintext")
+
+# 客戶端 JSON 輸出
+parse_doc(doc_path_list, output_dir, output_format="client_json")
+
+# 組合使用：版權限制 + JSON 輸出
+parse_doc(
+    doc_path_list,
+    output_dir,
+    disable_image_extract=True,
+    output_format="client_json"
+)
 ```
 
 ---
