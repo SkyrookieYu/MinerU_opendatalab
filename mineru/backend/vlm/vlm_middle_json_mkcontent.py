@@ -6,6 +6,10 @@ from mineru.utils.char_utils import full_to_half_exclude_marks, is_hyphen_at_lin
 from mineru.utils.config_reader import get_latex_delimiter_config, get_formula_enable, get_table_enable
 from mineru.utils.enum_class import MakeMode, BlockType, ContentType, ContentTypeV2
 from mineru.utils.language import detect_lang
+from mineru.utils.cut_image import COPYRIGHT_RESTRICTED_MARKER
+
+# 版權限制提示文字
+COPYRIGHT_NOTICE = "此內容因版權原因無法顯示"
 
 latex_delimiters_config = get_latex_delimiter_config()
 
@@ -44,8 +48,11 @@ def merge_para_with_text(para_block, formula_enable=True, img_buket_path=''):
                 if formula_enable:
                     content = f"\n{display_left_delimiter}\n{span['content']}\n{display_right_delimiter}\n"
                 else:
-                    if span.get('image_path', ''):
-                        content = f"![]({img_buket_path}/{span['image_path']})"
+                    img_path = span.get('image_path', '')
+                    if img_path == COPYRIGHT_RESTRICTED_MARKER:
+                        content = f"[{COPYRIGHT_NOTICE}]"
+                    elif img_path:
+                        content = f"![]({img_buket_path}/{img_path})"
 
             content = content.strip()
             if content:
@@ -121,8 +128,11 @@ def mk_blocks_to_markdown(para_blocks, make_mode, formula_enable, table_enable, 
                             for line in block['lines']:
                                 for span in line['spans']:
                                     if span['type'] == ContentType.IMAGE:
-                                        if span.get('image_path', ''):
-                                            para_text += f"![]({img_buket_path}/{span['image_path']})"
+                                        img_path = span.get('image_path', '')
+                                        if img_path == COPYRIGHT_RESTRICTED_MARKER:
+                                            para_text += f"[{COPYRIGHT_NOTICE}]"
+                                        elif img_path:
+                                            para_text += f"![]({img_buket_path}/{img_path})"
                     for block in para_block['blocks']:  # 3rd.拼image_footnote
                         if block['type'] == BlockType.IMAGE_FOOTNOTE:
                             para_text += '  \n' + merge_para_with_text(block)
@@ -132,8 +142,11 @@ def mk_blocks_to_markdown(para_blocks, make_mode, formula_enable, table_enable, 
                             for line in block['lines']:
                                 for span in line['spans']:
                                     if span['type'] == ContentType.IMAGE:
-                                        if span.get('image_path', ''):
-                                            para_text += f"![]({img_buket_path}/{span['image_path']})"
+                                        img_path = span.get('image_path', '')
+                                        if img_path == COPYRIGHT_RESTRICTED_MARKER:
+                                            para_text += f"[{COPYRIGHT_NOTICE}]"
+                                        elif img_path:
+                                            para_text += f"![]({img_buket_path}/{img_path})"
                     for block in para_block['blocks']:  # 2nd.拼image_caption
                         if block['type'] == BlockType.IMAGE_CAPTION:
                             para_text += '  \n' + merge_para_with_text(block)
@@ -154,11 +167,18 @@ def mk_blocks_to_markdown(para_blocks, make_mode, formula_enable, table_enable, 
                                     if table_enable:
                                         if span.get('html', ''):
                                             para_text += f"\n{span['html']}\n"
-                                        elif span.get('image_path', ''):
-                                            para_text += f"![]({img_buket_path}/{span['image_path']})"
+                                        else:
+                                            img_path = span.get('image_path', '')
+                                            if img_path == COPYRIGHT_RESTRICTED_MARKER:
+                                                para_text += f"[{COPYRIGHT_NOTICE}]"
+                                            elif img_path:
+                                                para_text += f"![]({img_buket_path}/{img_path})"
                                     else:
-                                        if span.get('image_path', ''):
-                                            para_text += f"![]({img_buket_path}/{span['image_path']})"
+                                        img_path = span.get('image_path', '')
+                                        if img_path == COPYRIGHT_RESTRICTED_MARKER:
+                                            para_text += f"[{COPYRIGHT_NOTICE}]"
+                                        elif img_path:
+                                            para_text += f"![]({img_buket_path}/{img_path})"
                 for block in para_block['blocks']:  # 3rd.拼table_footnote
                     if block['type'] == BlockType.TABLE_FOOTNOTE:
                         para_text += '\n' + merge_para_with_text(block) + '  '
@@ -232,8 +252,13 @@ def make_blocks_to_content_list(para_block, img_buket_path, page_idx, page_size)
                 for line in block['lines']:
                     for span in line['spans']:
                         if span['type'] == ContentType.IMAGE:
-                            if span.get('image_path', ''):
-                                para_content['img_path'] = f"{img_buket_path}/{span['image_path']}"
+                            img_path = span.get('image_path', '')
+                            if img_path == COPYRIGHT_RESTRICTED_MARKER:
+                                para_content['img_path'] = ''
+                                para_content['copyright_restricted'] = True
+                                para_content['copyright_notice'] = COPYRIGHT_NOTICE
+                            elif img_path:
+                                para_content['img_path'] = f"{img_buket_path}/{img_path}"
             if block['type'] == BlockType.IMAGE_CAPTION:
                 para_content[BlockType.IMAGE_CAPTION].append(merge_para_with_text(block))
             if block['type'] == BlockType.IMAGE_FOOTNOTE:
@@ -249,8 +274,13 @@ def make_blocks_to_content_list(para_block, img_buket_path, page_idx, page_size)
                             if span.get('html', ''):
                                 para_content[BlockType.TABLE_BODY] = f"{span['html']}"
 
-                            if span.get('image_path', ''):
-                                para_content['img_path'] = f"{img_buket_path}/{span['image_path']}"
+                            img_path = span.get('image_path', '')
+                            if img_path == COPYRIGHT_RESTRICTED_MARKER:
+                                para_content['img_path'] = ''
+                                para_content['copyright_restricted'] = True
+                                para_content['copyright_notice'] = COPYRIGHT_NOTICE
+                            elif img_path:
+                                para_content['img_path'] = f"{img_buket_path}/{img_path}"
 
             if block['type'] == BlockType.TABLE_CAPTION:
                 para_content[BlockType.TABLE_CAPTION].append(merge_para_with_text(block))
@@ -339,21 +369,40 @@ def make_blocks_to_content_list_v2(para_block, img_buket_path, page_size):
         }
     elif para_type == BlockType.INTERLINE_EQUATION:
         image_path, math_content = get_body_data(para_block)
-        para_content = {
-            'type': ContentTypeV2.EQUATION_INTERLINE,
-            'content': {
-                'math_content': math_content,
-                'math_type': 'latex',
-                'image_source': {'path': f"{img_buket_path}/{image_path}"},
+        if image_path == COPYRIGHT_RESTRICTED_MARKER:
+            para_content = {
+                'type': ContentTypeV2.EQUATION_INTERLINE,
+                'content': {
+                    'math_content': math_content,
+                    'math_type': 'latex',
+                    'image_source': {'path': ''},
+                    'copyright_restricted': True,
+                    'copyright_notice': COPYRIGHT_NOTICE,
+                }
             }
-        }
+        else:
+            para_content = {
+                'type': ContentTypeV2.EQUATION_INTERLINE,
+                'content': {
+                    'math_content': math_content,
+                    'math_type': 'latex',
+                    'image_source': {'path': f"{img_buket_path}/{image_path}"},
+                }
+            }
     elif para_type == BlockType.IMAGE:
         image_caption = []
         image_footnote = []
         image_path, _ = get_body_data(para_block)
-        image_source = {
-            'path': f"{img_buket_path}/{image_path}",
-        }
+        if image_path == COPYRIGHT_RESTRICTED_MARKER:
+            image_source = {
+                'path': '',
+                'copyright_restricted': True,
+                'copyright_notice': COPYRIGHT_NOTICE,
+            }
+        else:
+            image_source = {
+                'path': f"{img_buket_path}/{image_path}",
+            }
         for block in para_block['blocks']:
             if block['type'] == BlockType.IMAGE_CAPTION:
                 image_caption.extend(merge_para_with_text_v2(block))
@@ -371,9 +420,16 @@ def make_blocks_to_content_list_v2(para_block, img_buket_path, page_size):
         table_caption = []
         table_footnote = []
         image_path, html = get_body_data(para_block)
-        image_source = {
-            'path': f"{img_buket_path}/{image_path}",
-        }
+        if image_path == COPYRIGHT_RESTRICTED_MARKER:
+            image_source = {
+                'path': '',
+                'copyright_restricted': True,
+                'copyright_notice': COPYRIGHT_NOTICE,
+            }
+        else:
+            image_source = {
+                'path': f"{img_buket_path}/{image_path}",
+            }
         if html.count("<table") > 1:
             table_nest_level = 2
         else:
