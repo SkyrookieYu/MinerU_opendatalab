@@ -723,8 +723,9 @@ mineru/
 conda activate mineru_2_7_0
 
 # 從原始碼安裝（必須，才能使用自訂功能）
+# MinerU 2.7.0 預設 backend 為 hybrid，建議安裝所有後端
 cd /home/cobra/projects/MinerU_opendatalab
-pip install -e ".[pipeline]"
+pip install -e ".[all]"
 
 # API 服務器額外需要
 pip install fastapi uvicorn python-multipart aiohttp
@@ -757,7 +758,7 @@ parse_doc_by_physical_page(
 
 ## 注意事項
 
-1. **必須從原始碼安裝**: 自訂功能修改了 mineru 核心程式碼，必須執行 `pip install -e ".[pipeline]"` 才能生效。
+1. **必須從原始碼安裝**: 自訂功能修改了 mineru 核心程式碼，必須執行 `pip install -e ".[all]"` 才能生效（MinerU 2.7.0 預設 backend 為 hybrid）。
 
 2. **語意合併行為**: MinerU 預設會合併跨頁內容，使用 `parse_doc_by_physical_page` 可繞過此行為。
 
