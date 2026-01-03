@@ -2069,4 +2069,84 @@ MinerU_opendatalab/
 │
 └── mineru/
     └── (既有修改，見功能一至五)
+
+---
+
+### 單一 GPU 環境的 Worker 數量設定
+
+#### 問題現象
+
+在單一 GPU 環境使用多個 Worker（預設 4 個）時，發現 PDF 處理會**間歇性卡住**：
+- 同一個 PDF 有時能處理完成，有時會停住不動
+- GPU 使用率降至 5%，CPU 使用率升至 84%
+- 任務停留在 `processing` 狀態長達 5+ 分鐘
+
+#### 根本原因
+
+多個 Worker 同時競爭單一 GPU 資源，造成 **race condition**：
+
 ```
+Worker-1 ──┬──> GPU (處理 pdf1)
+Worker-2 ──┼──> GPU (處理 pdf2)  ← 資源競爭！
+Worker-3 ──┼──> GPU (處理 pdf3)  ← 互相等待！
+Worker-4 ──┴──> GPU (處理 pdf4)  ← 可能 deadlock！
+```
+
+#### MinerU 內部已有批次推理機制
+
+調查 MinerU 原始碼發現，pipeline 後端已根據 GPU 記憶體**自動進行批次推理**：
+
+```python
+# mineru/backend/pipeline/pipeline_analyze.py
+if gpu_memory >= 48:
+    batch_ratio = 16
+elif gpu_memory >= 24:
+    batch_ratio = 8
+elif gpu_memory >= 16:
+    batch_ratio = 4
+elif gpu_memory >= 8:
+    batch_ratio = 2
+else:
+    batch_ratio = 1
+```
+
+批次大小設定（`mineru/backend/pipeline/batch_analyze.py`）：
+- MFR (公式識別): `batch_ratio × 16`
+- OCR 偵測: `batch_ratio × 16`
+- 表格分類: `16`
+
+**結論**：MinerU 內部已針對單一 GPU 進行優化，**外部不需要多 Worker**。
+
+#### 解決方案
+
+將 `DEFAULT_WORKERS` 從 4 改為 1：
+
+```python
+# batch_api.py
+DEFAULT_WORKERS = 1  # Single worker optimal for single GPU (MinerU has internal batch inference)
+```
+
+#### 正確的架構理解
+
+| 架構 | Worker 數量 | 說明 |
+|------|-------------|------|
+| 單一 GPU | 1 | MinerU 內部批次處理，無需外部並行 |
+| 多 GPU（MIG/MPS） | N | 每個虛擬 GPU 分配一個 Worker |
+| 多實體 GPU | N | 每張 GPU 分配一個 Worker |
+
+#### 效能不會下降的原因
+
+雖然改成單一 Worker，但處理速度不會下降，因為：
+
+1. **GPU 是瓶頸**：PDF 解析主要消耗 GPU 資源，單一 Worker 已能充分利用 GPU
+2. **內部批次**：MinerU 會將多頁組成 batch 一起推理
+3. **避免競爭**：消除 GPU 資源競爭後，反而更穩定高效
+
+#### 經驗總結
+
+> **模型是產品，基礎設施才是護城河。**
+
+這個問題讓我們理解：
+- 有模型是一回事，讓它穩定高效地跑起來又是另一回事
+- 單機部署時，需要理解模型內部的資源使用模式
+- 大型 LLM 服務（如 Claude）能同時服務全球用戶，靠的是大規模分散式基礎設施 + 智慧調度
