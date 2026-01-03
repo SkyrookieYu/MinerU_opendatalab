@@ -98,7 +98,7 @@ class TaskDB:
         self,
         file_name: str,
         file_path: str,
-        backend: str = "hybrid",
+        backend: str = "hybrid-auto-engine",
         options: Optional[dict] = None,
         priority: int = 0,
     ) -> str:
@@ -108,7 +108,7 @@ class TaskDB:
         Args:
             file_name: Original file name
             file_path: Path to uploaded file
-            backend: Processing backend ("hybrid", "pipeline", or "vlm")
+            backend: Processing backend ("hybrid-auto-engine", "pipeline", etc.)
             options: Additional options (JSON serializable)
             priority: Task priority (higher = processed first)
 

@@ -28,7 +28,7 @@ from pathlib import Path
 parse_doc(
     [Path("document.pdf")],
     "output_dir",
-    backend="hybrid",  # MinerU 2.7.0 預設
+    backend="hybrid-auto-engine",  # MinerU 2.7.0 預設
     disable_image_extract=True,
     output_format="client_json"
 )

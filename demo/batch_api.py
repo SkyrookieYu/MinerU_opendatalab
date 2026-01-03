@@ -182,7 +182,7 @@ class Worker:
                 pdf_path=Path(file_path),
                 output_dir=str(output_dir),
                 lang=options.get('lang', 'ch'),
-                backend=task.get('backend', 'hybrid'),
+                backend=task.get('backend', 'hybrid-auto-engine'),
                 method=options.get('method', 'auto'),
                 disable_image_extract=options.get('disable_image_extract', True),
             )
@@ -337,7 +337,7 @@ def shutdown_event():
 @app.post("/api/v1/parse", response_model=SubmitResponse, status_code=201)
 async def submit_task(
     file: UploadFile = File(...),
-    backend: str = Form("hybrid"),
+    backend: str = Form("hybrid-auto-engine"),
     lang: str = Form("ch"),
     priority: int = Form(0),
     disable_image_extract: bool = Form(True),

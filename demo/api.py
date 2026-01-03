@@ -116,7 +116,7 @@ def execute_parsing(task_id: str):
             pdf_path=task.pdf_path,
             output_dir=str(task.output_dir),
             lang="ch",
-            backend="hybrid",
+            backend="hybrid-auto-engine",
             method="auto",
             disable_image_extract=True,  # Default: no image extraction
         )

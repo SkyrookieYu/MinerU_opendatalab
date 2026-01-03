@@ -358,7 +358,7 @@ def parse_doc_by_physical_page(
     pdf_path: Path,
     output_dir,
     lang="ch",
-    backend="hybrid",
+    backend="hybrid-auto-engine",
     method="auto",
     server_url=None,
     disable_image_extract=False,
@@ -380,7 +380,7 @@ def parse_doc_by_physical_page(
         pdf_path: Path to the PDF file (single file only)
         output_dir: Output directory for storing parsing results
         lang: Language option for OCR, default is 'ch'
-        backend: Backend for parsing (default: 'hybrid' in MinerU 2.7.0)
+        backend: Backend for parsing (default: 'hybrid-auto-engine' in MinerU 2.7.0)
         method: Parsing method ('auto', 'txt', 'ocr')
         server_url: Server URL for vlm-http-client backend
         disable_image_extract: Disable image extraction due to copyright restrictions
