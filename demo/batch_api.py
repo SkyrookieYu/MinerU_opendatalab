@@ -11,11 +11,11 @@ Enterprise-grade PDF parsing API with:
 Reference: mineru_tianshu project architecture
 
 Usage:
-    # Start with default settings (4 workers)
+    # Start with default settings (1 worker, optimal for single GPU)
     python batch_api.py
 
-    # Custom worker count
-    python batch_api.py --workers 8
+    # Custom worker count (only for multi-GPU setups)
+    python batch_api.py --workers 2
 
     # With uvicorn (production)
     uvicorn batch_api:app --host 0.0.0.0 --port 8000 --workers 1
@@ -52,7 +52,7 @@ TEMP_DIR = Path(tempfile.gettempdir()) / "mineru_batch_api"
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
 # Worker configuration
-DEFAULT_WORKERS = 4
+DEFAULT_WORKERS = 1  # Single worker optimal for single GPU (MinerU has internal batch inference)
 WORKER_POLL_INTERVAL = 0.5  # seconds
 
 # Task configuration

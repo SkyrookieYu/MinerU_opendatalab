@@ -37,7 +37,7 @@ except ImportError:
 # 設定區域
 # =============================================================================
 
-API_URL = "http://127.0.0.1:8001"  # API 伺服器位址
+API_URL = "http://127.0.0.1:8000"  # API 伺服器位址
 POLL_INTERVAL = 5  # 輪詢間隔（秒）
 MAX_CONCURRENT = 3  # 最大同時處理數
 OUTPUT_DIR = "output_results"  # 結果輸出目錄
