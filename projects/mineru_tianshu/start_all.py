@@ -50,7 +50,8 @@ class TianshuLauncher:
             api_proc = subprocess.Popen(
                 [sys.executable, 'api_server.py'],
                 cwd=Path(__file__).parent,
-                env=env
+                env=env,
+                start_new_session=True  # 創建新進程組，方便統一終止
             )
             self.processes.append(('API Server', api_proc))
             time.sleep(3)
@@ -76,7 +77,8 @@ class TianshuLauncher:
             
             worker_proc = subprocess.Popen(
                 worker_cmd,
-                cwd=Path(__file__).parent
+                cwd=Path(__file__).parent,
+                start_new_session=True  # 創建新進程組，方便統一終止
             )
             self.processes.append(('LitServe Workers', worker_proc))
             time.sleep(5)
@@ -100,7 +102,8 @@ class TianshuLauncher:
             
             scheduler_proc = subprocess.Popen(
                 scheduler_cmd,
-                cwd=Path(__file__).parent
+                cwd=Path(__file__).parent,
+                start_new_session=True  # 創建新進程組，方便統一終止
             )
             self.processes.append(('Task Scheduler', scheduler_proc))
             time.sleep(3)
@@ -138,17 +141,23 @@ class TianshuLauncher:
             return False
     
     def stop_services(self, signum=None, frame=None):
-        """停止所有服务"""
+        """停止所有服务（包括子進程的所有孫進程）"""
         logger.info("")
         logger.info("=" * 70)
         logger.info("⏹️  Stopping All Services...")
         logger.info("=" * 70)
-        
+
+        # 終止整個進程組（包含所有子進程）
         for name, proc in self.processes:
             if proc.poll() is None:  # 进程仍在运行
-                logger.info(f"   Stopping {name} (PID: {proc.pid})...")
-                proc.terminate()
-        
+                logger.info(f"   Stopping {name} (PID: {proc.pid}) and its children...")
+                try:
+                    # 發送 SIGTERM 到整個進程組
+                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                except (ProcessLookupError, PermissionError):
+                    # 進程已結束或無權限，嘗試直接終止
+                    proc.terminate()
+
         # 等待所有进程结束
         for name, proc in self.processes:
             try:
@@ -156,7 +165,11 @@ class TianshuLauncher:
                 logger.info(f"   ✅ {name} stopped")
             except subprocess.TimeoutExpired:
                 logger.warning(f"   ⚠️  {name} did not stop gracefully, forcing...")
-                proc.kill()
+                try:
+                    # 強制殺死整個進程組
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    proc.kill()
                 proc.wait()
         
         logger.info("=" * 70)
