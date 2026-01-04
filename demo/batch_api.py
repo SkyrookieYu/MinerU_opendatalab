@@ -52,7 +52,7 @@ TEMP_DIR = Path(tempfile.gettempdir()) / "mineru_batch_api"
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
 # Worker configuration
-DEFAULT_WORKERS = 4
+DEFAULT_WORKERS = 1
 WORKER_POLL_INTERVAL = 0.5  # seconds
 
 # Task configuration

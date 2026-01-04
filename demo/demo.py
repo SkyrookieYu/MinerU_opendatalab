@@ -432,7 +432,14 @@ def parse_doc_by_physical_page(
             )
 
             # Read the generated JSON for this page
-            json_path = os.path.join(temp_output_dir, file_name, method, f"{file_name}.json")
+            # Note: hybrid backend uses "hybrid_{method}" as output directory name
+            if backend.startswith("hybrid-"):
+                output_method = f"hybrid_{method}"
+            elif backend.startswith("vlm-"):
+                output_method = "vlm"
+            else:
+                output_method = method
+            json_path = os.path.join(temp_output_dir, file_name, output_method, f"{file_name}.json")
             if os.path.exists(json_path):
                 with open(json_path, 'r', encoding='utf-8') as f:
                     page_data = json.load(f)
